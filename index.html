@@ -1,0 +1,206 @@
+html_content = """<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>360° マップビューア</title>
+
+  <!-- Leaflet（地図） -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <!-- Pannellum（360°ビューア） -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.css"/>
+  <script src="https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.js"></script>
+
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; display: flex; height: 100vh; font-family: sans-serif; }
+    #map { width: 40%; height: 100%; }
+    #viewer-area {
+      width: 60%;
+      height: 100%;
+      background: #111;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      position: relative;
+    }
+    #placeholder {
+      color: #fff;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      font-size: 18px;
+    }
+    #panorama {
+      width: 100%;
+      height: 100%;
+      display: none;
+    }
+    #spot-label {
+      position: absolute;
+      top: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.6);
+      color: #fff;
+      padding: 6px 18px;
+      border-radius: 20px;
+      font-size: 15px;
+      pointer-events: none;
+      display: none;
+      z-index: 10;
+      white-space: nowrap;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="map"></div>
+
+  <div id="viewer-area">
+    <div id="spot-label"></div>
+    <div id="placeholder">
+      <span style="font-size:56px">📍</span>
+      <span>地図のピンをクリックしてください</span>
+      <span style="font-size:13px; color:#aaa;">360°写真がここに表示されます</span>
+    </div>
+    <div id="panorama"></div>
+  </div>
+
+  <script>
+    // ============================================================
+    // ★ここだけ書き換えてください★
+    //
+    // photo: 写真のファイル名（index.htmlと同じフォルダに置く）
+    // lat:   緯度（Google マップで撮影地点を右クリック→数字をコピー）
+    // lng:   経度（緯度の右側の数字）
+    // label: ピンに表示する名前（自由に決めてOK）
+    // ============================================================
+    const spots = [
+      { photo: 'photo01.jpg', lat: 36.60254, lng: 137.04333, label: 'No.0付近(底張工下流端)' },
+      { photo: 'photo02.jpg', lat: 36.60226, lng: 137.04362, label: '垂直壁～帯工' },
+      { photo: 'photo03.jpg', lat: 36.60214, lng: 137.04371, label: '本堤正面' },
+      { photo: 'photo04.jpg', lat: 36.60210, lng: 137.04377, label: '水通し' },
+      { photo: 'photo05.jpg', lat: 36.60196, lng: 137.04370, label: '堰堤左岸側上流' },
+      { photo: 'photo06.jpg', lat: 36.60212, lng: 137.04396, label: '堰堤右岸側上流' },
+      { photo: 'photo07.jpg', lat: 36.60193, lng: 137.04349, label: '堰堤左岸側袖端部' },
+      { photo: 'photo08.jpg', lat: 36.60215, lng: 137.04338, label: '施工ヤード' },
+      { photo: 'photo09.jpg', lat: 36.60152, lng: 137.04261, label: '転回所' },
+      { photo: 'photo10.jpg', lat: 36.60139, lng: 137.04323, label: '工事用道路起点部' },
+    ];
+
+    // ============================================================
+    // ★平面図の設定★
+    //
+    // file:    平面図のファイル名（index.htmlと同じフォルダに置く）
+    // bounds:  平面図の左下（南西）と右上（北東）のGPS座標
+    // opacity: 透明度（0=完全透明 〜 1=完全不透明、0.5くらいが見やすい）
+    // ============================================================
+    const planOverlay = {
+      file: 'plan.jpg',
+      bounds: [
+        [36.87933, 136.99159],   // 左下（南西）の座標 ← ここを書き換える
+        [36.88113, 136.99341]    // 右上（北東）の座標 ← ここを書き換える
+      ],
+      opacity: 0.5
+    };
+    // ============================================================
+
+    // 地図を初期化（最初のスポットを中心に表示）
+    const map = L.map('map', { maxZoom: 22 }).setView([spots[0].lat, spots[0].lng], 17);
+
+    // タイルレイヤーを定義
+    const tiles = {
+      '地理院地図': L.tileLayer(
+        'https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png',
+        {
+          attribution: "<a href='https://maps.gsi.go.jp/development/ichiran.html' target='_blank'>国土地理院</a>",
+          maxNativeZoom: 18, maxZoom: 22
+        }
+      ),
+      '航空写真': L.tileLayer(
+        'https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg',
+        {
+          attribution: "<a href='https://maps.gsi.go.jp/development/ichiran.html' target='_blank'>国土地理院</a>",
+          maxNativeZoom: 18, maxZoom: 22
+        }
+      ),
+      '淡色地図': L.tileLayer(
+        'https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png',
+        {
+          attribution: "<a href='https://maps.gsi.go.jp/development/ichiran.html' target='_blank'>国土地理院</a>",
+          maxNativeZoom: 18, maxZoom: 22
+        }
+      ),
+      'OpenStreetMap': L.tileLayer(
+        'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+        {
+          attribution: '© OpenStreetMap contributors',
+          maxNativeZoom: 19, maxZoom: 22
+        }
+      ),
+    };
+
+    // デフォルトは地理院地図
+    tiles['地理院地図'].addTo(map);
+
+    // 平面図オーバーレイ
+    const planLayer = L.imageOverlay(planOverlay.file, planOverlay.bounds, {
+      opacity: planOverlay.opacity
+    }).addTo(map);
+
+    // 右上に切り替えボタンを追加（平面図のオン/オフも含む）
+    L.control.layers(tiles, { '平面図': planLayer }).addTo(map);
+
+    // Pannellumビューア管理
+    let viewer = null;
+
+    // 各地点にピンを置く
+    spots.forEach(spot => {
+      const marker = L.circleMarker([spot.lat, spot.lng], {
+        radius: 10,
+        color: 'red',
+        fillColor: 'red',
+        fillOpacity: 0.8,
+        weight: 2
+      }).addTo(map)
+        .bindPopup('<b>' + spot.label + '</b><br>クリックで360°表示');
+
+      marker.on('click', () => {
+        const placeholder = document.getElementById('placeholder');
+        if (placeholder) placeholder.style.display = 'none';
+
+        const labelEl = document.getElementById('spot-label');
+        labelEl.textContent = spot.label;
+        labelEl.style.display = 'block';
+
+        const panoramaDiv = document.getElementById('panorama');
+        panoramaDiv.style.display = 'block';
+
+        if (viewer) {
+          viewer.destroy();
+          panoramaDiv.innerHTML = '';
+        }
+
+        viewer = pannellum.viewer('panorama', {
+          type: 'equirectangular',
+          panorama: spot.photo,
+          autoLoad: true,
+          compass: true,
+          showZoomCtrl: true,
+          showFullscreenCtrl: true,
+          title: spot.label
+        });
+
+        map.setView([spot.lat, spot.lng], map.getZoom());
+      });
+    });
+  </script>
+
+</body>
+</html>
+"""
